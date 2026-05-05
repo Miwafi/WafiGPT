@@ -6,23 +6,24 @@ from safetensors.torch import save_file
 from bitsandbytes.optim import AdamW8bit
 from collections import Counter, OrderedDict
 from tqdm import tqdm
+from pathlib import Path
 
 # ================================================
 
 default_config = {
-    "hidden_size": 768,
-    "ffn_hidden_size": 3072,
-    "block_count": 12,
-    "num_heads": 12,
+    "hidden_size": 1024,
+    "ffn_hidden_size": 4096,
+    "block_count": 24,
+    "num_heads": 16,
     "num_kv_heads": 1,
     "rope_dim": 64,
     "rope_base": 10000,
     "vocab_size": 32000,
     "max_seq_length": 512,
-    "batch_size": 1,
+    "batch_size": 2,
     "split_valid": 0.01,
     "dropout_rate": 0.1,
-    "learning_rate": 2e-4,
+    "learning_rate": 1e-4,
     "learning_gamma": 0.95,
     "layer_norm_eps": 1e-6,
     "global_tokens": {
@@ -33,11 +34,12 @@ default_config = {
         "<|system|>": 2,
         "<|user|>": 3,
         "<|think|>": 4,
+        "<|/think|>": 11,
         "<|assistant|>": 5,
         "<|function|>": 6,
         "<|end|>": 7,
         "\\n": 8,
-        "WafiGPT": 9,
+        "WaFiGPT": 9,
         "Miwafi": 10,
     }
 }
@@ -284,29 +286,92 @@ class ChatTokenizer:
 
 # ================================================
 
+def find_training_files(data_dir="./data"):
+    data_path = Path(data_dir)
+    if not data_path.exists():
+        raise FileNotFoundError(f"Data directory not found: {data_dir}")
+    
+    supported_extensions = {".txt", ".jsonl"}
+    files = []
+    for f in data_path.iterdir():
+        if f.is_file() and f.suffix.lower() in supported_extensions:
+            files.append(str(f))
+    
+    if not files:
+        raise FileNotFoundError(f"No training files found in {data_dir}")
+    
+    print(f"Found {len(files)} training files:")
+    for f in files:
+        print(f"  - {f}")
+    return files
+
+
 class ChatDataset(Dataset):
     def __init__(self, tokenizer, path, config):
         self.tokenizer = tokenizer
         self.max_len = config["max_seq_length"] + 1
         self.path = path
+        self.file_ext = Path(path).suffix.lower()
         self.offsets = []
-        with open(path, "rb") as f:
+        
+        if self.file_ext == ".jsonl":
+            self._load_jsonl_offsets()
+        elif self.file_ext == ".txt":
+            self._load_txt_offsets()
+        else:
+            raise ValueError(f"Unsupported file format: {self.file_ext}")
+        
+        self.length = len(self.offsets)
+
+    def _load_txt_offsets(self):
+        with open(self.path, "rb") as f:
             offset = 0
             for line in f:
                 if line.strip():
                     self.offsets.append(offset)
                 offset += len(line)
-        self.length = len(self.offsets)
+
+    def _load_jsonl_offsets(self):
+        with open(self.path, "r", encoding="utf-8") as f:
+            offset = 0
+            for line in f:
+                if line.strip():
+                    self.offsets.append(offset)
+                offset += len(line.encode("utf-8"))
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         offset = self.offsets[idx]
-        with open(self.path, "rb") as f:
-            f.seek(offset)
-            line = f.readline().decode("utf-8", errors="replace").strip()
-        enc = self.tokenizer(line, self.max_len, update=False)
+        
+        if self.file_ext == ".jsonl":
+            with open(self.path, "r", encoding="utf-8") as f:
+                f.seek(offset)
+                line = f.readline().strip()
+            try:
+                data = json.loads(line)
+                text = ""
+                if "instruction" in data:
+                    text = data.get("instruction", "")
+                    if "input" in data and data["input"]:
+                        text += "\n" + data["input"]
+                    if "output" in data and data["output"]:
+                        output_text = data["output"]
+                        text += "\n" + output_text
+                elif "text" in data:
+                    text = data["text"]
+                else:
+                    text = line
+            except json.JSONDecodeError:
+                text = line
+        else:
+            with open(self.path, "rb") as f:
+                f.seek(offset)
+                line = f.readline().decode("utf-8", errors="replace").strip()
+            text = line
+        
+        enc = self.tokenizer(text, self.max_len, update=False)
         ids = enc["input_ids"]
         return {"input_ids": ids[:-1], "attention_mask": enc["attention_mask"][:-1], "labels": ids[1:]}
 
@@ -324,6 +389,13 @@ class CustomLRScheduler:
             param_group['lr'] = new_lr
 
 # ================================================
+
+def get_gpu_stats():
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated(0) / 1024**2
+        reserved = torch.cuda.memory_reserved(0) / 1024**2
+        return f"GPU Mem: {allocated:.0f}MB/{reserved:.0f}MB"
+    return ""
 
 def run_epoch(model, data_loader, device, pad_id, epoch, optimizer=None, scaler=None):
     total_loss = 0.0
@@ -358,7 +430,12 @@ def run_epoch(model, data_loader, device, pad_id, epoch, optimizer=None, scaler=
         total_correct += correct
         total_tokens += mask.sum().item()
         avg_acc = total_correct / total_tokens if total_tokens > 0 else 0.0
-        pbar.set_postfix({"loss": f"{loss.item():.6f}", "acc":  f"{avg_acc:.6f}", "lr":   f"{lr:.6f}"})
+        
+        gpu_stats = get_gpu_stats()
+        postfix = {"loss": f"{loss.item():.6f}", "acc": f"{avg_acc:.6f}", "lr": f"{lr:.6f}"}
+        if gpu_stats:
+            postfix["gpu"] = gpu_stats
+        pbar.set_postfix(postfix)
 
     avg_loss = total_loss / len(data_loader)
     avg_acc  = total_correct / total_tokens if total_tokens > 0 else 0.0
@@ -366,14 +443,32 @@ def run_epoch(model, data_loader, device, pad_id, epoch, optimizer=None, scaler=
 
 # ================================================
 
-def stage_train(stages, config):
+def stage_train(stages, config, data_dir="./data"):
     print(f"\n========== Tokenizer ==========\n")
     tokenizer = ChatTokenizer(config)
     tokenizer.build_split_tokens(stages)
     pad_id = tokenizer.get_split_tokens()["<|padding|>"]
+    
+    os.makedirs("./model", exist_ok=True)
+    with open("./model/tokenizer.json", "w", encoding="utf-8") as f:
+        json.dump(tokenizer.get_split_tokens(), f, indent=4, ensure_ascii=False)
+    print(f"Saved tokenizer to ./model/tokenizer.json")
+    print(f"Vocabulary size: {len(tokenizer.get_split_tokens())}\n")
 
     model = ChatModel(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    print(f"\n========== Device Information ==========\n")
+    if torch.cuda.is_available():
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+        print(f"CUDA Version: {torch.version.cuda}")
+        print(f"GPU Compute Capability: {torch.cuda.get_device_capability(0)[0]}.{torch.cuda.get_device_capability(0)[1]}")
+        print(f"\nNote: GPU usage will show in 'CUDA' or 'Compute', not '3D' in task manager")
+    else:
+        print("Using CPU")
+    print(f"Device: {device}\n")
+    
     model.to(device)
     optimizer = AdamW8bit(model.parameters(), lr=config["learning_rate"])
     scheduler = CustomLRScheduler(optimizer, config)
@@ -395,7 +490,7 @@ def stage_train(stages, config):
         val_loader = DataLoader(val_dataset, batch_size=config["batch_size"],
             num_workers=num_workers, persistent_workers=(num_workers > 0), shuffle=False, pin_memory=True)
 
-        for _ in range(stage["epochs"]):
+        for epoch in range(stage["epochs"]):
             scheduler.step(global_epoch)
             model.train()
             train_loss, train_acc = run_epoch(model, train_loader, device, pad_id, global_epoch, optimizer=optimizer, scaler=scaler)
@@ -404,26 +499,22 @@ def stage_train(stages, config):
 
             save_path = os.path.join("./model", f"{stage['stage_name']}_epoch_{global_epoch+1}")
             os.makedirs(save_path, exist_ok=True)
+            
             with open(os.path.join(save_path, "tokenizer.json"), "w", encoding="utf-8") as f:
                 json.dump(tokenizer.get_split_tokens(), f, indent=4, ensure_ascii=False)
+            
             with open(os.path.join(save_path, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
+            
             state = model.state_dict()
             save_file(state, os.path.join(save_path, "model.safetensors"))
+            del state
+            
+            print(f"\nSaved checkpoint: {save_path}")
+            print(f"  Train Loss: {train_loss:.6f}, Train Acc: {train_acc:.6f}")
+            print(f"  Valid Loss: {val_loss:.6f}, Valid Acc: {val_acc:.6f}\n")
 
             global_epoch += 1
-
-# ================================================
-
-# ================================================
-
-def find_txt_files(directory):
-    txt_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".txt"):
-                txt_files.append(os.path.join(root, file))
-    return txt_files
 
 # ================================================
 
@@ -431,28 +522,8 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     
-    data_dir = "./data"
-    if os.path.exists(data_dir):
-        txt_files = find_txt_files(data_dir)
-        if txt_files:
-            stages = []
-            for txt_file in txt_files:
-                stage_name = os.path.splitext(os.path.basename(txt_file))[0]
-                stages.append({
-                    "stage_name": stage_name,
-                    "file_path": txt_file,
-                    "epochs": 10
-                })
-            print(f"Found {len(txt_files)} training files:")
-            for f in txt_files:
-                print(f"- {f}")
-        else:
-            print(f"Error: No .txt files found in {data_dir} directory.")
-            print("Please add training text files to the data directory and try again.")
-            exit(1)
-    else:
-        print(f"Error: Data directory {data_dir} does not exist.")
-        print("Please create the data directory and add training text files.")
-        exit(1)
-    
+    training_files = find_training_files("./data")
+    stages = [
+        {"stage_name": "Fine-tuning", "file_path": training_files[0], "epochs": 15},
+    ]
     stage_train(stages, default_config)

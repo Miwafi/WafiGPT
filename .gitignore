@@ -6,7 +6,7 @@ __pycache__/
 # Model files
 model/
 dataset/
-
+data/
 # IDE
 .vscode/
 .idea/
@@ -17,6 +17,7 @@ dataset/
 # OS
 .DS_Store
 Thumbs.db
+
 
 # Environment
 .env

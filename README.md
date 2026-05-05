@@ -1,5 +1,4 @@
 # WafiGPT
-## README由dudu-14贡献,在此向您表达感谢！
 <div align="center">
 
 ![WafiGPT Logo](https://img.shields.io/badge/WafiGPT-重构了-blue?style=for-the-badge)

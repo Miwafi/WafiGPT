@@ -6,44 +6,61 @@ from colorama import init as colorama_init, Fore, Style, Back
 
 colorama_init(autoreset=True)
 
+THINK_COLOR = Fore.BLACK + Back.WHITE
+RESET = Style.RESET_ALL
+INDENT = "  "
+
+def get_terminal_width():
+    try:
+        return shutil.get_terminal_size().columns
+    except:
+        return 80
+
+def print_wrapped(text, indent=INDENT, width=None):
+    if width is None:
+        width = get_terminal_width()
+    available_width = width - len(indent)
+    if available_width <= 0:
+        available_width = 40
+    
+    lines = []
+    current_line = ""
+    for char in text:
+        if len(current_line) >= available_width:
+            lines.append(current_line)
+            current_line = char
+        else:
+            current_line += char
+    if current_line:
+        lines.append(current_line)
+    
+    for i, line in enumerate(lines):
+        if i == 0:
+            print(f"{indent}{line}", end="")
+        else:
+            print(f"\n{indent}{line}", end="")
+
 # ================================================
 
-TERMINAL_WIDTH = shutil.get_terminal_size().columns
-
-def print_header():
-    print()
-    print(Fore.CYAN + "╔" + "═" * (TERMINAL_WIDTH - 2) + "╗")
-    title = " WafiGPT "
-    padding = (TERMINAL_WIDTH - 2 - len(title)) // 2
-    print(Fore.CYAN + "║" + " " * padding + Fore.WHITE + Style.BRIGHT + title + Fore.CYAN + " " * (TERMINAL_WIDTH - 2 - padding - len(title)) + "║")
-    print(Fore.CYAN + "╚" + "═" * (TERMINAL_WIDTH - 2) + "╝")
-    print()
-
-def print_separator(char="─", color=Fore.BLUE):
-    print(color + char * TERMINAL_WIDTH + Style.RESET_ALL)
-
-def print_section(title, color=Fore.YELLOW):
-    print()
-    print(color + "┌" + "─" * (TERMINAL_WIDTH - 2) + "┐")
-    padding = (TERMINAL_WIDTH - 2 - len(title)) // 2
-    print(color + "│" + " " * padding + Fore.WHITE + Style.BRIGHT + title + color + " " * (TERMINAL_WIDTH - 2 - padding - len(title)) + "│")
-    print(color + "└" + "─" * (TERMINAL_WIDTH - 2) + "┘" + Style.RESET_ALL)
-    print()
-
-def print_info(label, value, label_color=Fore.GREEN, value_color=Fore.WHITE):
-    print(f"  {label_color}{label}{Style.RESET_ALL}: {value_color}{value}{Style.RESET_ALL}")
-
-def print_loading_spinner(message, duration=0.5):
-    import time
-    import sys
-    spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    for _ in range(int(duration * 10)):
-        for char in spinner:
-            sys.stdout.write(f'\r{Fore.YELLOW}{char}{Style.RESET_ALL} {message}')
-            sys.stdout.flush()
-            time.sleep(0.05)
-    sys.stdout.write('\r' + ' ' * (len(message) + 2) + '\r')
-    sys.stdout.flush()
+def find_latest_model(model_base_dir="./model"):
+    if not os.path.exists(model_base_dir):
+        raise FileNotFoundError(f"Model directory not found: {model_base_dir}")
+    
+    best_model_path = os.path.join(model_base_dir, "best_model")
+    if os.path.exists(best_model_path) and os.path.exists(os.path.join(best_model_path, "model.safetensors")):
+        return best_model_path
+    
+    model_dirs = []
+    for item in os.listdir(model_base_dir):
+        item_path = os.path.join(model_base_dir, item)
+        if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, "model.safetensors")):
+            model_dirs.append(item_path)
+    
+    if not model_dirs:
+        raise FileNotFoundError(f"No valid models found in {model_base_dir}")
+    
+    latest_model = max(model_dirs, key=lambda p: os.path.getmtime(p))
+    return latest_model
 
 # ================================================
 
@@ -69,13 +86,13 @@ def generate_response(model, tokenizer, prompt, device, config, max_length=512, 
     unknown_id = tokenizer.split_tokens.get("<|unknown|>")
     end_id = tokenizer.split_tokens.get("<|end|>")
     newline_id = tokenizer.split_tokens.get("\\n")
-
-    print()
-    print(f"{Fore.GREEN}╭{'─' * (TERMINAL_WIDTH - 2)}╮{Style.RESET_ALL}")
-    print(f"{Fore.GREEN}│{Style.RESET_ALL} {Fore.WHITE + Style.BRIGHT}WafiGPT{Style.RESET_ALL} {' ' * (TERMINAL_WIDTH - 12)}{Fore.GREEN}│{Style.RESET_ALL}")
-    print(f"{Fore.GREEN}╰{'─' * (TERMINAL_WIDTH - 2)}╯{Style.RESET_ALL}")
-    print()
-    print(f"{Fore.WHITE}", end="", flush=True)
+    
+    think_start_id = tokenizer.split_tokens.get("<|think|>")
+    think_end_id = tokenizer.split_tokens.get("<|/think|>")
+    
+    in_thinking = False
+    text_buffer = ""
+    first_think = True
 
     with torch.no_grad():
         for _ in range(max_length):
@@ -99,136 +116,110 @@ def generate_response(model, tokenizer, prompt, device, config, max_length=512, 
             generated = torch.cat((generated, torch.tensor([[token_id]], device=generated.device)), dim=1)
             if token_id == end_id:
                 break
+            
             token_str = tokenizer.decode([token_id])
-            if token_id == newline_id:
-                print()
+            text_buffer += token_str
+            
+            if token_id == think_start_id:
+                in_thinking = True
+                if first_think:
+                    print(f"\n{INDENT}{THINK_COLOR} thinking {RESET}")
+                    first_think = False
+                else:
+                    print(f"\n{INDENT}{THINK_COLOR} thinking {RESET}")
+                text_buffer = ""
+            elif token_id == think_end_id:
+                in_thinking = False
+                print(f"\n{INDENT}{Fore.BLACK}{Back.GREEN} Output {RESET}\n")
+                text_buffer = ""
+            elif in_thinking:
+                if "</think>" in text_buffer:
+                    parts = text_buffer.split("</think>")
+                    content = parts[0]
+                    if content:
+                        for line in content.split("\n"):
+                            if line.strip():
+                                print(f"{INDENT}{Fore.WHITE}{line}{RESET}")
+                    print(f"\n{INDENT}{Fore.BLACK}{Back.GREEN} Output {RESET}\n")
+                    in_thinking = False
+                    text_buffer = parts[1] if len(parts) > 1 else ""
+                    if text_buffer:
+                        print_wrapped(text_buffer, indent=INDENT)
+                        text_buffer = ""
+                elif token_id == newline_id:
+                    line = text_buffer[:-1].strip()
+                    if line:
+                        print(f"{INDENT}{Fore.WHITE}{line}{RESET}")
+                    text_buffer = ""
+                else:
+                    pass
             else:
-                print(token_str, end="", flush=True)
-    print(Style.RESET_ALL)
-    print()
+                if "<think>" in text_buffer:
+                    parts = text_buffer.split("<think>")
+                    before_think = parts[0]
+                    if before_think:
+                        print_wrapped(before_think, indent=INDENT)
+                    in_thinking = True
+                    if first_think:
+                        print(f"\n{INDENT}{THINK_COLOR} thinking {RESET}")
+                        first_think = False
+                    else:
+                        print(f"\n{INDENT}{THINK_COLOR} thinking {RESET}")
+                    text_buffer = parts[1] if len(parts) > 1 else ""
+                elif token_id == newline_id:
+                    print_wrapped(text_buffer[:-1], indent=INDENT)
+                    print()
+                    text_buffer = ""
+                elif len(text_buffer) > 10:
+                    print_wrapped(text_buffer, indent=INDENT)
+                    text_buffer = ""
+    if text_buffer:
+        if in_thinking:
+            for line in text_buffer.split("\n"):
+                if line.strip():
+                    print(f"{INDENT}{Fore.WHITE}{line}{RESET}")
+        else:
+            print_wrapped(text_buffer, indent=INDENT)
+    if not in_thinking:
+        print()
 
 # ================================================
 
 def load_chat_model(model_dir, device):
-    print_loading_spinner("Loading configuration...")
-    
     with open(os.path.join(model_dir, "config.json"), "r", encoding="utf-8") as f:
         config = json.load(f)
-    
-    print_loading_spinner("Loading tokenizer...")
-    
     with open(os.path.join(model_dir, "tokenizer.json"), "r", encoding="utf-8") as f:
         token_dict = json.load(f)
-    
     tokenizer = ChatTokenizer(config)
     tokenizer.split_tokens = OrderedDict(token_dict)
-    
-    print_loading_spinner("Loading model weights...")
-    
     model = ChatModel(config).to(device)
     state_dict = load_file(os.path.join(model_dir, "model.safetensors"))
     model.load_state_dict(state_dict)
     model.eval()
 
-    print_section("Model Information", Fore.CYAN)
     total_params = sum(p.numel() for p in model.parameters())
-    print_info("Total Parameters", f"{total_params:,}")
-    print_info("Hidden Size", config["hidden_size"])
-    print_info("Number of Layers", config["block_count"])
-    print_info("Number of Heads", config["num_heads"])
-    print_info("Vocabulary Size", config["vocab_size"])
-    print_info("Device", str(device).upper())
-    print()
-    
+    print(f"  Parameters: {total_params:,} | Device: {device}")
     return model, tokenizer, config
 
 # ================================================
 
-def find_latest_model(model_dir):
-    if not os.path.exists(model_dir):
-        return None
-    
-    model_folders = []
-    for folder in os.listdir(model_dir):
-        folder_path = os.path.join(model_dir, folder)
-        if os.path.isdir(folder_path):
-            if os.path.exists(os.path.join(folder_path, "config.json")) and \
-               os.path.exists(os.path.join(folder_path, "tokenizer.json")) and \
-               os.path.exists(os.path.join(folder_path, "model.safetensors")):
-                model_folders.append(folder_path)
-    
-    if not model_folders:
-        return None
-    
-    model_folders.sort(key=os.path.getmtime, reverse=True)
-    return model_folders[0]
-
-# ================================================
-
-def print_help():
-    print_section("Available Commands", Fore.YELLOW)
-    print(f"  {Fore.CYAN}/help{Style.RESET_ALL}     - Show this help message")
-    print(f"  {Fore.CYAN}/clear{Style.RESET_ALL}    - Clear the screen")
-    print(f"  {Fore.CYAN}/exit{Style.RESET_ALL}     - Exit the chat")
-    print(f"  {Fore.CYAN}/quit{Style.RESET_ALL}     - Same as /exit")
-    print()
-    print(f"  {Fore.GREEN}Tip:{Style.RESET_ALL} Type your message and press Enter to chat with WafiGPT")
-    print()
-
-# ================================================
-
 if __name__ == "__main__":
-    print_header()
-    
-    print_section("Loading Model", Fore.CYAN)
-    
-    model_dir = find_latest_model("./model")
-    if model_dir:
-        print_info("Model Path", model_dir)
-        print()
-    else:
-        print(f"{Fore.RED}Error:{Style.RESET_ALL} No valid model found in ./model directory.")
-        print(f"{Fore.YELLOW}Please run the training script first to generate a model.{Style.RESET_ALL}")
-        exit(1)
-    
+    print(f"\n  {Fore.BLACK}{Back.WHITE} WaFiGPT {RESET}\n")
+    model_dir = find_latest_model()
+    print(f"  Loading model from: {model_dir}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, tokenizer, config = load_chat_model(model_dir, device)
-    
-    print_separator("═", Fore.GREEN)
-    print(f"{Fore.GREEN}  ✓ Model loaded successfully! Ready to chat.{Style.RESET_ALL}")
-    print_separator("═", Fore.GREEN)
     print()
-    
-    print_help()
-    
     while True:
-        print(f"{Fore.CYAN}╭{'─' * (TERMINAL_WIDTH - 2)}╮{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}│{Style.RESET_ALL} {Fore.WHITE + Style.BRIGHT}You{Style.RESET_ALL} {' ' * (TERMINAL_WIDTH - 7)}{Fore.CYAN}│{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}╰{'─' * (TERMINAL_WIDTH - 2)}╯{Style.RESET_ALL}")
-        
         try:
-            prompt = input(f"  {Fore.CYAN}▶{Style.RESET_ALL} ")
-        except (KeyboardInterrupt, EOFError):
-            print()
-            print(f"\n{Fore.YELLOW}Goodbye! 👋{Style.RESET_ALL}")
+            prompt = input(f"  {Fore.CYAN}>{RESET} ")
+            if prompt.strip().lower() in ["exit", "quit"]:
+                break
+            if prompt.strip():
+                generate_response(model, tokenizer, prompt, device, config)
+        except KeyboardInterrupt:
+            print("\n")
             break
-        
-        if not prompt.strip():
-            continue
-            
-        command = prompt.strip().lower()
-        
-        if command in ["/exit", "/quit"]:
-            print()
-            print(f"{Fore.YELLOW}Goodbye! 👋{Style.RESET_ALL}")
+        except EOFError:
+            print("\n")
             break
-        elif command == "/help":
-            print_help()
-            continue
-        elif command == "/clear":
-            os.system('cls' if os.name == 'nt' else 'clear')
-            print_header()
-            continue
-        
-        generate_response(model, tokenizer, prompt, device, config)
-        print_separator("─", Fore.BLUE)
