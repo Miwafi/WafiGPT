@@ -1,0 +1,5 @@
+torch>=2.0.0
+safetensors>=0.4.0
+bitsandbytes>=0.41.0
+colorama>=0.4.6
+tqdm>=4.65.0

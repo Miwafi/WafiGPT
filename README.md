@@ -1,293 +1,164 @@
-# WafiGPT
-<div align="center">
+# WaFiGPT
 
-![WafiGPT Logo](https://img.shields.io/badge/WafiGPT-重构了-blue?style=for-the-badge)
-
-[![Python Version](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/Miwafi/WafiGPT?style=social)](https://github.com/Miwafi/WafiGPT)
 
-**一个基于 PyTorch 的智能聊天系统**
+WaFiGPT 是一个基于 PyTorch 实现的轻量级大语言模型（LLM）项目，采用 Transformer 架构，支持自定义训练与对话推理。
 
-[🚀 快速开始](#快速开始) • [📖 使用指南](#使用指南) • [🛠️ 开发文档](#开发文档) • [🤝 贡献指南](#贡献指南)
+## 项目概述
 
-</div>
+本项目从零实现了完整的语言模型训练与推理流程，包含以下核心特性：
 
----
+- **Transformer 架构**：基于自注意力机制（Self-Attention）的解码器模型
+- **分组查询注意力（GQA）**：支持多头注意力与键值头共享，降低推理内存占用
+- **旋转位置编码（RoPE）**：实现相对位置编码，提升长序列建模能力
+- **RMS 层归一化**：替代传统 LayerNorm，提升训练稳定性
+- **SwiGLU 激活函数**：采用门控线性单元，增强模型表达能力
+- **8-bit 量化优化器**：集成 bitsandbytes 实现显存高效训练
 
-## 📋 目录
-
-- [✨ 特性](#特性)
-- [🔧 系统要求](#系统要求)
-- [🚀 快速开始](#快速开始)
-- [📖 使用指南](#使用指南)
-- [🛠️ 开发文档](#开发文档)
-- [🤝 贡献指南](#贡献指南)
-- [📄 许可证](#许可证)
-- [👥 开发团队](#开发团队)
-
----
-
-## ✨ 特性
-
-- � **AI 聊天** - 基于 PyTorch 的智能对话系统
-- 🔧 **模型训练** - 支持自定义数据集训练
-- 💾 **模型保存** - 使用 Safetensors 格式保存模型
-- ⚡ **高效训练** - 支持 8-bit 优化器和混合精度
-
----
-
-## 🔧 系统要求
-
-### 最低配置
-
-- **操作系统**: Windows 10+ / macOS 10.14+ / Linux (Ubuntu 18.04+)
-- **处理器**: x86/x64 架构
-- **内存**: 8GB RAM
-- **存储空间**: 至少 100MB 可用空间
-- **Python 版本**: Python 3.11+
-
-### 推荐配置（用于训练）
-
-- **内存**: 16GB+ RAM
-- **GPU**: NVIDIA GPU (6GB+ 显存)
-- **CUDA**: 11.7+
-
-### 依赖库
+## 项目结构
 
 ```
-torch
-bitsandbytes
-safetensors
-tqdm
-colorama
-re
-json
-os
-math
+WafiGPT/
+├── train.py          # 模型训练脚本
+├── chat.py           # 对话推理脚本
+├── data/             # 训练数据目录
+├── model/            # 模型检查点存储目录
+├── .gitignore        # Git 忽略配置
+└── README.md         # 项目文档
 ```
 
----
+## 环境依赖
 
-## 🚀 快速开始
+- Python 3.11+
+- PyTorch 2.0+
+- CUDA Toolkit（推荐，用于 GPU 加速）
 
-### 1. 克隆项目
+### 安装依赖
 
 ```bash
-git clone https://github.com/Miwafi/WafiGPT.git
-cd WafiGPT
+pip install -r requirements.txt
 ```
 
-### 2. 安装依赖
+## 模型架构
 
-```bash
-pip install torch bitsandbytes safetensors tqdm colorama
+### 配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `hidden_size` | 1024 | 隐藏层维度 |
+| `ffn_hidden_size` | 4096 | 前馈网络中间层维度 |
+| `block_count` | 24 | Transformer 层数 |
+| `num_heads` | 16 | 注意力头数量 |
+| `num_kv_heads` | 1 | 键值头数量（GQA） |
+| `rope_dim` | 64 | 旋转位置编码维度 |
+| `vocab_size` | 32000 | 词表大小 |
+| `max_seq_length` | 512 | 最大序列长度 |
+
+### 特殊 Token
+
+| Token | ID | 用途 |
+|-------|-----|------|
+| `<|padding|>` | 0 | 填充标记 |
+| `<|unknown|>` | 1 | 未知词标记 |
+| `<|system|>` | 2 | 系统提示 |
+| `<|user|>` | 3 | 用户输入标记 |
+| `<|assistant|>` | 5 | 助手回复标记 |
+| `<|think|>` | 4 | 思考过程开始 |
+| `<|/think|>` | 11 | 思考过程结束 |
+| `<|end|>` | 7 | 序列结束标记 |
+
+## 数据格式
+
+### 文本格式（.txt）
+
+每行一条训练样本：
+
+```
+<|user|>你好<|assistant|>你好！有什么可以帮助你的吗？<|end|>
 ```
 
-### 3. 准备数据
+### JSON Lines 格式（.jsonl）
 
-创建 `data` 目录并添加训练数据文件（.txt 格式）
+```json
+{"instruction": "解释量子计算", "input": "", "output": "量子计算是一种利用量子力学原理进行信息处理的计算范式..."}
+```
 
-### 4. 训练模型
+或
+
+```json
+{"text": "<|user|>你好<|assistant|>你好！<|end|>"}
+```
+
+## 使用指南
+
+### 训练模型
+
+1. 准备训练数据，放置于 `./data/` 目录
+2. 运行训练脚本：
 
 ```bash
 python train.py
 ```
 
-### 5. 开始聊天
+训练过程中会自动保存模型检查点至 `./model/` 目录，包含：
+- `model.safetensors`：模型权重（SafeTensors 格式）
+- `config.json`：模型配置
+- `tokenizer.json`：分词器词表
+
+### 对话推理
 
 ```bash
 python chat.py
 ```
 
----
+启动后输入提示词即可与模型交互，支持以下命令：
+- `exit` 或 `quit`：退出程序
+- `Ctrl+C`：中断当前生成
 
-## 📖 使用指南
+### 推理参数
 
-### 基本操作
+在 `generate_response` 函数中可调整以下参数：
 
-| 功能            | 操作方法                             | 说明               |
-| --------------- | ------------------------------------ | ------------------ |
-| 🚀 **启动软件** | 运行 `python chat.py`                | 启动聊天界面       |
-| ⚙️ **训练模型** | 运行 `python train.py`               | 开始模型训练       |
-| 📝 **准备数据** | 在 `data` 目录添加 .txt 文件         | 提供训练数据       |
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `max_length` | 512 | 最大生成长度 |
+| `temperature` | 0.3 | 采样温度，控制随机性 |
+| `repetition_penalty` | 1.0 | 重复惩罚系数 |
+| `presence_penalty` | -1.5 | 存在惩罚系数 |
 
-### 高级功能
+## 训练流程
 
-#### 自定义训练
+训练采用分阶段（Stage-based）设计，支持多数据集连续训练：
 
-1. 在 `data` 目录添加训练数据文件（.txt 格式）
-2. 调整 `train.py` 中的配置参数
-3. 运行训练脚本
-4. 训练完成后会在 `model` 目录生成模型文件
-
-#### 聊天参数调整
-
-在 `chat.py` 中可以调整以下参数：
-- `temperature`: 生成多样性（0.1-1.0）
-- `repetition_penalty`: 重复惩罚（0.8-1.2）
-- `presence_penalty`: 出现惩罚（-2.0-2.0）
-
----
-
-## 🛠️ 开发文档
-
-### 项目结构
-
-```
-MemoAI/
-├── train.py           # 模型训练脚本
-├── chat.py            # 聊天交互脚本
-├── README.md          # 项目说明
-└── model/            # 模型保存目录（自动生成）
+```python
+stages = [
+    {"stage_name": "Pre-training", "file_path": "data/pretrain.txt", "epochs": 10},
+    {"stage_name": "Fine-tuning", "file_path": "data/finetune.jsonl", "epochs": 5},
+]
 ```
 
-### 核心模块
+每个阶段独立进行训练/验证集划分，自动保存检查点。
 
-- **模型模块**: 基于 Transformer 的聊天模型
-- **训练模块**: 数据加载、模型训练和评估
-- **推理模块**: 模型加载和对话生成
-- **分词模块**: 文本分词和 token 转换
+## 分词器
 
----
+采用基于规则的分词策略：
 
-## 🤝 贡献指南
+1. **特殊 Token**：优先匹配预定义的特殊标记
+2. **英文单词**：连续字母序列作为整体
+3. **数字**：单个数字独立成词
+4. **空格**：保留空格信息
+5. **其他字符**：按单字符切分
 
-我们欢迎所有形式的贡献！
+分词器支持动态词表扩展，训练过程中自动构建词表。
 
-### 如何贡献
+## 许可证
 
-1. Fork 本项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+本项目采用 MIT 许可证开源，详见 [LICENSE](LICENSE) 文件。
 
-### 贡献类型
+## 致谢
 
-- 🐛 Bug 修复
-- ✨ 新功能开发
-- 📝 文档改进
-- 🎨 界面优化
-- 🔧 性能提升
-
----
-
-## 📄 许可证
-
-本项目采用 **MIT 许可证** - 详见 [LICENSE](LICENSE) 文件
-
-### 使用条款
-
-- ✅ **免费使用** - 个人和商业用途
-- ✅ **自由修改** - 可根据需要调整代码
-- ✅ **自由分享** - 可重新分发和传播
-- ✅ **免费更新** - 持续的功能改进
-
-### 重要声明
-
-- 🚫 **禁止收费** - 本软件永久免费
-- ⚖️ **法律合规** - 请遵守当地法律法规
-- 🛡️ **免责声明** - AI 回答仅供参考，使用风险自负
-
----
-
-## 👥 开发团队
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://space.bilibili.com/1201856558">
-        <img src="https://img.shields.io/badge/Bilibili-pyro-ff69b4?style=for-the-badge&logo=bilibili" alt="pyro"/>
-        <br />
-        <sub><b>pyro</b></sub>
-      </a>
-      <br />
-      <sub>项目创始人 & 主要开发者</sub>
-    </td>
-    <td align="center">
-      <a href="https://space.bilibili.com/1499517607">
-        <img src="https://img.shields.io/badge/Bilibili-S_steve-00d4aa?style=for-the-badge&logo=bilibili" alt="S_steve"/>
-        <br />
-        <sub><b>S_steve</b></sub>
-      </a>
-      <br />
-      <sub>开发协助 & 技术支持</sub>
-    </td>
-  </tr>
-</table>
-
----
-
-<div align="center">
-
-### 🌟 如果这个项目对您有帮助，请给我们一个 Star！
-
-[![GitHub stars](https://img.shields.io/github/stars/Miwafi/WafiGPT?style=social)](https://github.com/Miwafi/WafiGPT/stargazers)
-
-**Made with ❤️ by MemoAI Team**
-
-</div>
-
----
-
-## 🌍 多语言版本
-
-<details>
-<summary>🇺🇸 English Version</summary>
-
-# WafiGPT
-
-**An intelligent chat system based on PyTorch**
-
-## Features
-
-- 🤖 AI-powered chat system
-- � Custom model training
-- 💾 Safetensors model format
-- ⚡ Efficient training with 8-bit optimizer and mixed precision
-
-## Quick Start
-
-1. Clone the repository
-2. Install dependencies: `pip install torch bitsandbytes safetensors tqdm colorama`
-3. Create `data` directory and add training files
-4. Train model: `python train.py`
-5. Start chatting: `python chat.py`
-
-## System Requirements
-
-- Python 3.11+
-- 8GB RAM minimum
-- NVIDIA GPU (6GB+ VRAM) for training
-- CUDA 11.7+
-
-For detailed documentation, please refer to the Chinese version above.
-
-</details>
-
-<details>
-<summary>🇯🇵 日本語版</summary>
-
-# WafiGPT
-
-**PyTorch ベースのインテリジェントチャットシステム**
-
-## 特徴
-
-- 🤖 AI 搭載のチャットシステム
-- TK カスタムモデルトレーニング
-- 💾 Safetensors モデル形式
-- ⚡ 8ビットオプティマイザーとミックス精度による効率的なトレーニング
-
-## クイックスタート
-
-1. リポジトリをクローン
-2. 依存関係をインストール: `pip install torch bitsandbytes safetensors tqdm colorama`
-3. `data` ディレクトリを作成してトレーニングファイルを追加
-4. モデルをトレーニング: `python train.py`
-5. チャットを開始: `python chat.py`
-
-詳細なドキュメントについては、上記の中国語版をご参照ください。
-
-</details>
+- [PyTorch](https://pytorch.org/)：深度学习框架
+- [Hugging Face](https://huggingface.co/)：SafeTensors 格式支持
+- [bitsandbytes](https://github.com/TimDettmers/bitsandbytes)：8-bit 优化器实现
