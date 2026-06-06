@@ -2,7 +2,7 @@
 
 基于 PyTorch 实现的轻量级大语言模型（LLM）项目，采用 Transformer 架构，支持自定义训练与对话推理！
 
-## Requirements
+## 需要这些依赖
 
 Python 3.11+ 是推荐版本。其他 Python 版本可能需要不同的 pip 命令。
 
@@ -24,7 +24,7 @@ pip install peft
 pip install evaluate
 ```
 
-## File Information
+## 文件信息
 
 以下列出所有相关代码及其他相关文档的存储位置。
 
@@ -41,7 +41,7 @@ WafiGPT/
 └── ...                 # .gitignore, LICENSE
 ```
 
-## Architecture diagram
+## 可爱的架构图
 
 WafiGPT 大语言模型项目通用架构图。
 
@@ -85,9 +85,9 @@ graph TD
     LMHead --> Generator
 ```
 
-## Model Architecture
+## 模型架构
 
-### Configuration Parameters
+### 模型架构的参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -100,27 +100,27 @@ graph TD
 | `vocab_size` | 32000 | 词表大小 |
 | `max_seq_length` | 512 | 最大序列长度 |
 
-### Special Tokens
+### 特别的Token们
 
 | Token | ID | 用途 |
 |-------|-----|------|
 | `<\|padding\|>` | 0 | 填充标记 |
 | `<\|unknown\|>` | 1 | 未知词标记 |
 | `<\|system\|>` | 2 | 系统提示 |
-| `<\|user\|>` | 3 | 用户输入标记 |
-| `<\|assistant\|>` | 5 | 助手回复标记 |
+| `<\|user\|>` | 3 | 输入标记 |
+| `<\|assistant\|>` | 5 | 输出标记 |
 | `<\|think\|>` | 4 | 思考过程开始 |
 | `<\|/think\|>` | 11 | 思考过程结束 |
 | `<\|end\|>` | 7 | 序列结束标记 |
 
-## Support System
+## 配置要求
 
 请确保你的计算机满足以下系统要求。
 
 | 配置 | 权限 | 系统版本 | 处理器 | 内存 | 存储 |
 |------|------|----------|--------|------|------|
-| 最低 | 普通用户 | >= Windows 10 / Linux | 2 GHz | 8GB | 5GB |
-| 推荐 | 普通用户 | >= Windows 11 / Linux | 4 GHz | 16GB | 10GB |
+| 最低 | 普通用户 | >= Windows 10 / Linux | 2 GHz | 8GB | 20GB |
+| 推荐 | 普通用户 | >= Windows 10 / Linux | 4 GHz | 16GB | 50GB |
 
 ## 使用指南
 
