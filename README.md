@@ -1,49 +1,93 @@
-# WaFiGPT
+# WafiGPT
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/Miwafi/WafiGPT?style=social)](https://github.com/Miwafi/WafiGPT)
+基于 PyTorch 实现的轻量级大语言模型（LLM）项目，采用 Transformer 架构，支持自定义训练与对话推理！
 
-WaFiGPT 是一个基于 PyTorch 实现的轻量级大语言模型（LLM）项目，采用 Transformer 架构，支持自定义训练与对话推理。
+## Requirements
 
-## 项目概述
+Python 3.11+ 是推荐版本。其他 Python 版本可能需要不同的 pip 命令。
 
-本项目从零实现了完整的语言模型训练与推理流程，包含以下核心特性：
+```
+pip install torch
+pip install safetensors
+pip install tokenizers
+pip install transformers
+pip install accelerate
+pip install datasets
+pip install tqdm
+```
 
-- **Transformer 架构**：基于自注意力机制（Self-Attention）的解码器模型
-- **分组查询注意力（GQA）**：支持多头注意力与键值头共享，降低推理内存占用
-- **旋转位置编码（RoPE）**：实现相对位置编码，提升长序列建模能力
-- **RMS 层归一化**：替代传统 LayerNorm，提升训练稳定性
-- **SwiGLU 激活函数**：采用门控线性单元，增强模型表达能力
-- **8-bit 量化优化器**：集成 bitsandbytes 实现显存高效训练
+非必需依赖安装，仅用于特定功能。
 
-## 项目结构
+```
+pip install bitsandbytes
+pip install peft
+pip install evaluate
+```
+
+## File Information
+
+以下列出所有相关代码及其他相关文档的存储位置。
 
 ```
 WafiGPT/
-├── train.py          # 模型训练脚本
-├── chat.py           # 对话推理脚本
-├── data/             # 训练数据目录
-├── model/            # 模型检查点存储目录
-├── .gitignore        # Git 忽略配置
-└── README.md         # 项目文档
+├── train.py            # 模型训练脚本
+├── chat.py             # 对话推理脚本
+├── data/               # 训练数据目录
+│   └── ...             # pretrain.txt, finetune.jsonl
+│
+├── model/              # 模型检查点存储目录
+│   └── ...             # model.safetensors, config.json, tokenizer.json
+│
+└── ...                 # .gitignore, LICENSE
 ```
 
-## 环境依赖
+## Architecture diagram
 
-- Python 3.11+
-- PyTorch 2.0+
-- CUDA Toolkit（推荐，用于 GPU 加速）
+WafiGPT 大语言模型项目通用架构图。
 
-### 安装依赖
+```mermaid
+graph TD
+    classDef model fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    classDef data fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef train fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c
+    classDef infer fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,stroke-dasharray: 5 5,color:#1b5e20
 
-```bash
-pip install -r requirements.txt
+    subgraph Model ["Transformer Model"]
+        Embedding["Token Embedding"]:::model
+        subgraph Layers ["Transformer Layers"]
+            Layer1["Layer 1"]:::model
+            LayerN["Layer N"]:::model
+        end
+        LMHead["LM Head"]:::model
+    end
+
+    subgraph Training ["Training Pipeline"]
+        DataLoader["Data Loader"]:::data
+        Optimizer["8-bit Optimizer"]:::train
+        Scheduler["LR Scheduler"]:::train
+        Loss["CrossEntropy Loss"]:::train
+    end
+
+    subgraph Inference ["Inference"]
+        Tokenizer["Tokenizer"]:::infer
+        Generator["Text Generator"]:::infer
+    end
+
+    DataLoader --> Embedding
+    Embedding --> Layers
+    Layer1 --> LayerN
+    Layers --> LMHead
+    LMHead --> Loss
+    Loss --> Optimizer
+    Optimizer --> Scheduler
+
+    Tokenizer --> Embedding
+    LMHead --> Generator
 ```
 
-## 模型架构
+## Model Architecture
 
-### 配置参数
+### Configuration Parameters
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -56,40 +100,27 @@ pip install -r requirements.txt
 | `vocab_size` | 32000 | 词表大小 |
 | `max_seq_length` | 512 | 最大序列长度 |
 
-### 特殊 Token
+### Special Tokens
 
 | Token | ID | 用途 |
 |-------|-----|------|
-| `<|padding|>` | 0 | 填充标记 |
-| `<|unknown|>` | 1 | 未知词标记 |
-| `<|system|>` | 2 | 系统提示 |
-| `<|user|>` | 3 | 用户输入标记 |
-| `<|assistant|>` | 5 | 助手回复标记 |
-| `<|think|>` | 4 | 思考过程开始 |
-| `<|/think|>` | 11 | 思考过程结束 |
-| `<|end|>` | 7 | 序列结束标记 |
+| `<\|padding\|>` | 0 | 填充标记 |
+| `<\|unknown\|>` | 1 | 未知词标记 |
+| `<\|system\|>` | 2 | 系统提示 |
+| `<\|user\|>` | 3 | 用户输入标记 |
+| `<\|assistant\|>` | 5 | 助手回复标记 |
+| `<\|think\|>` | 4 | 思考过程开始 |
+| `<\|/think\|>` | 11 | 思考过程结束 |
+| `<\|end\|>` | 7 | 序列结束标记 |
 
-## 数据格式
+## Support System
 
-### 文本格式（.txt）
+请确保你的计算机满足以下系统要求。
 
-每行一条训练样本：
-
-```
-<|user|>你好<|assistant|>你好！有什么可以帮助你的吗？<|end|>
-```
-
-### JSON Lines 格式（.jsonl）
-
-```json
-{"instruction": "解释量子计算", "input": "", "output": "量子计算是一种利用量子力学原理进行信息处理的计算范式..."}
-```
-
-或
-
-```json
-{"text": "<|user|>你好<|assistant|>你好！<|end|>"}
-```
+| 配置 | 权限 | 系统版本 | 处理器 | 内存 | 存储 |
+|------|------|----------|--------|------|------|
+| 最低 | 普通用户 | >= Windows 10 / Linux | 2 GHz | 8GB | 5GB |
+| 推荐 | 普通用户 | >= Windows 11 / Linux | 4 GHz | 16GB | 10GB |
 
 ## 使用指南
 
@@ -102,10 +133,7 @@ pip install -r requirements.txt
 python train.py
 ```
 
-训练过程中会自动保存模型检查点至 `./model/` 目录，包含：
-- `model.safetensors`：模型权重（SafeTensors 格式）
-- `config.json`：模型配置
-- `tokenizer.json`：分词器词表
+训练过程中会自动保存模型检查点至 `./model/` 目录。
 
 ### 对话推理
 
@@ -113,9 +141,7 @@ python train.py
 python chat.py
 ```
 
-启动后输入提示词即可与模型交互，支持以下命令：
-- `exit` 或 `quit`：退出程序
-- `Ctrl+C`：中断当前生成
+启动后输入提示词即可与模型交互。
 
 ### 推理参数
 
@@ -128,37 +154,11 @@ python chat.py
 | `repetition_penalty` | 1.0 | 重复惩罚系数 |
 | `presence_penalty` | -1.5 | 存在惩罚系数 |
 
-## 训练流程
+## 项目许可证
 
-训练采用分阶段（Stage-based）设计，支持多数据集连续训练：
+本项目采用 MIT 许可证开源。
 
-```python
-stages = [
-    {"stage_name": "Pre-training", "file_path": "data/pretrain.txt", "epochs": 10},
-    {"stage_name": "Fine-tuning", "file_path": "data/finetune.jsonl", "epochs": 5},
-]
-```
+如有任何问题、需求或 Bug 反馈，请通过以下方式联系我们。
 
-每个阶段独立进行训练/验证集划分，自动保存检查点。
-
-## 分词器
-
-采用基于规则的分词策略：
-
-1. **特殊 Token**：优先匹配预定义的特殊标记
-2. **英文单词**：连续字母序列作为整体
-3. **数字**：单个数字独立成词
-4. **空格**：保留空格信息
-5. **其他字符**：按单字符切分
-
-分词器支持动态词表扩展，训练过程中自动构建词表。
-
-## 许可证
-
-本项目采用 MIT 许可证开源，详见 [LICENSE](LICENSE) 文件。
-
-## 致谢
-
-- [PyTorch](https://pytorch.org/)：深度学习框架
-- [Hugging Face](https://huggingface.co/)：SafeTensors 格式支持
-- [bitsandbytes](https://github.com/TimDettmers/bitsandbytes)：8-bit 优化器实现
+Source Issues : https://github.com/Miwafi/WafiGPT/issues
+Official Email : 1942392307@qq.com
